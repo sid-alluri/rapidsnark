@@ -3,6 +3,8 @@
 #include "misc.hpp"
 #include <vector>
 #include <mutex>
+#include <chrono>
+
 
 namespace Groth16 {
 
@@ -48,38 +50,56 @@ std::unique_ptr<Prover<Engine>> makeProver(
 template <typename Engine>
 std::unique_ptr<Proof<Engine>> Prover<Engine>::prove(typename Engine::FrElement *wtns) {
 
+    cout << "groth16 proving" << endl;
     ThreadPool &threadPool = ThreadPool::defaultPool();
 
     LOG_TRACE("Start Multiexp A");
     uint32_t sW = sizeof(wtns[0]);
+    auto start_msm_a = std::chrono::high_resolution_clock::now();
     typename Engine::G1Point pi_a;
     E.g1.multiMulByScalarMSM(pi_a, pointsA, (uint8_t *)wtns, sW, nVars);
+    auto end_msm_a = std::chrono::high_resolution_clock::now();
+    auto duration_msm_a = std::chrono::duration_cast<std::chrono::microseconds>(end_msm_a - start_msm_a);
+    cout << "MSM A operation took: " << duration_msm_a.count() << " microseconds" << endl;
     std::ostringstream ss2;
     ss2 << "pi_a: " << E.g1.toString(pi_a);
     LOG_DEBUG(ss2);
 
     LOG_TRACE("Start Multiexp B1");
+    auto start_msm_b1 = std::chrono::high_resolution_clock::now();
     typename Engine::G1Point pib1;
     E.g1.multiMulByScalarMSM(pib1, pointsB1, (uint8_t *)wtns, sW, nVars);
+    auto end_msm_b1 = std::chrono::high_resolution_clock::now();
+    auto duration_msm_b1 = std::chrono::duration_cast<std::chrono::microseconds>(end_msm_b1 - start_msm_b1);
+    cout << "MSM B1 operation took: " << duration_msm_b1.count() << " microseconds" << endl;
     std::ostringstream ss3;
     ss3 << "pib1: " << E.g1.toString(pib1);
     LOG_DEBUG(ss3);
 
     LOG_TRACE("Start Multiexp B2");
+    auto start_msm_b2 = std::chrono::high_resolution_clock::now();
     typename Engine::G2Point pi_b;
     E.g2.multiMulByScalarMSM(pi_b, pointsB2, (uint8_t *)wtns, sW, nVars);
+    auto end_msm_b2 = std::chrono::high_resolution_clock::now();
+    auto duration_msm_b2 = std::chrono::duration_cast<std::chrono::microseconds>(end_msm_b2 - start_msm_b2);
+    cout << "MSM B2 operation took: " << duration_msm_b2.count() << " microseconds" << endl;
     std::ostringstream ss4;
     ss4 << "pi_b: " << E.g2.toString(pi_b);
     LOG_DEBUG(ss4);
 
     LOG_TRACE("Start Multiexp C");
     typename Engine::G1Point pi_c;
+    auto start_msm_c = std::chrono::high_resolution_clock::now();
     E.g1.multiMulByScalarMSM(pi_c, pointsC, (uint8_t *)((uint64_t)wtns + (nPublic +1)*sW), sW, nVars-nPublic-1);
+    auto end_msm_c = std::chrono::high_resolution_clock::now();
+    auto duration_msm_c = std::chrono::duration_cast<std::chrono::microseconds>(end_msm_c - start_msm_c);
+    cout << "MSM C operation took: " << duration_msm_c.count() << " microseconds" << endl;
     std::ostringstream ss5;
     ss5 << "pi_c: " << E.g1.toString(pi_c);
     LOG_DEBUG(ss5);
 
     LOG_TRACE("Start Initializing a b c A");
+    auto start_abc = std::chrono::high_resolution_clock::now();
     auto a = new typename Engine::FrElement[domainSize];
     auto b = new typename Engine::FrElement[domainSize];
     auto c = new typename Engine::FrElement[domainSize];
@@ -190,8 +210,6 @@ std::unique_ptr<Proof<Engine>> Prover<Engine>::prove(typename Engine::FrElement 
     LOG_TRACE("c After fft:");
     LOG_DEBUG(E.fr.toString(c[0]).c_str());
     LOG_DEBUG(E.fr.toString(c[1]).c_str());
-
-    LOG_TRACE("Start ABC");
     threadPool.parallelFor(0, domainSize, [&] (int begin, int end, int numThread) {
         for (u_int64_t i=begin; i<end; i++) {
             E.fr.mul(a[i], a[i], b[i]);
@@ -199,6 +217,10 @@ std::unique_ptr<Proof<Engine>> Prover<Engine>::prove(typename Engine::FrElement 
             E.fr.fromMontgomery(a[i], a[i]);
         }
     });
+    auto end_abc = std::chrono::high_resolution_clock::now();
+    auto duration_abc = std::chrono::duration_cast<std::chrono::microseconds>(end_abc - start_abc);
+    cout << "Init and Shift A, B, C operation took: " << duration_abc.count() << " microseconds" << endl;
+    LOG_TRACE("Start ABC");
     LOG_TRACE("abc:");
     LOG_DEBUG(E.fr.toString(a[0]).c_str());
     LOG_DEBUG(E.fr.toString(a[1]).c_str());
@@ -207,8 +229,14 @@ std::unique_ptr<Proof<Engine>> Prover<Engine>::prove(typename Engine::FrElement 
     delete [] c;
 
     LOG_TRACE("Start Multiexp H");
+    auto start_msm_h = std::chrono::high_resolution_clock::now();
     typename Engine::G1Point pih;
     E.g1.multiMulByScalarMSM(pih, pointsH, (uint8_t *)a, sizeof(a[0]), domainSize);
+    auto end_msm_h = std::chrono::high_resolution_clock::now();
+    auto duration_msm_h = std::chrono::duration_cast<std::chrono::microseconds>(end_msm_h - start_msm_h);
+    cout << "MSM H operation took: " << duration_msm_h.count() << " microseconds" << endl;
+    
+    LOG_TRACE("Start ABC");
     std::ostringstream ss1;
     ss1 << "pih: " << E.g1.toString(pih);
     LOG_DEBUG(ss1);
@@ -227,6 +255,7 @@ std::unique_ptr<Proof<Engine>> Prover<Engine>::prove(typename Engine::FrElement 
 
     typename Engine::G1Point p1;
     typename Engine::G2Point p2;
+    auto start_make_proof = std::chrono::high_resolution_clock::now();
 
     E.g1.add(pi_a, pi_a, vk_alpha1);
     E.g1.mulByScalar(p1, vk_delta1, (uint8_t *)&r, sizeof(r));
@@ -253,6 +282,9 @@ std::unique_ptr<Proof<Engine>> Prover<Engine>::prove(typename Engine::FrElement 
 
     E.g1.mulByScalar(p1, vk_delta1, (uint8_t *)&rs, sizeof(rs));
     E.g1.sub(pi_c, pi_c, p1);
+    auto end_make_proof = std::chrono::high_resolution_clock::now();
+    auto duration_make_proof = std::chrono::duration_cast<std::chrono::microseconds>(end_make_proof - start_make_proof);
+    cout << "Make Proof operation took: " << duration_make_proof.count() << " microseconds" << endl;
 
     Proof<Engine> *p = new Proof<Engine>(Engine::engine);
     E.g1.copy(p->A, pi_a);
